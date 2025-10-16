@@ -23,8 +23,6 @@ const loadDashboardBtn = document.getElementById('loadDashboardBtn'); // 讀取�
 const fileInput = document.getElementById('fileInput'); // 用於讀取檔案的隱藏 input 元素
 
 // --- 狀態管理變數 ---
-let components = []; // 儲存畫布上所有元件資料的陣列
-let selectedComponentId = null; // 當前被選中元件的 ID
 let mqttClient = null; // MQTT 客戶端實例
 const chartInstances = {}; // 儲存 Chart.js 圖表實例的物件
 const qrCodeInstances = {}; // 儲存 QRCode.js 實例的物件
@@ -86,7 +84,7 @@ let audioCtx; // Web Audio API 的上下文，用於音效
  * @returns {object | undefined} 找到的元件物件，或 undefined
  */
 function findComponentById(id) {
-    return components.find(c => c.id === id);
+    return componentState.findComponent(id);
 }
 
 // --- 模式管理 ---
@@ -123,12 +121,14 @@ function setMode(mode) {
         deselectComponent();
     }
 
+    componentState.setMode(mode);
+
     // 如果切換到檢視模式，處理 tasmota_status 元件的狀態更新
     if (mode === 'view' && mqttClient && mqttClient.connected) {
-        components.forEach(comp => {
+        componentState.getComponents().forEach(comp => {
             if (comp.type === 'tasmota_status') {
                 // 1. 同步 selectedStatus 到 defaultStatus
-                comp.selectedStatus = comp.defaultStatus;
+                componentState.updateComponent(comp.id, { selectedStatus: comp.defaultStatus });
 
                 // 2. 立即重新訂閱所有主題，以確保我們正在監聽正確的 STATUS 主題
                 subscribeToAllTopics();
@@ -173,7 +173,7 @@ function setupInteract() {
 
                     // 碰撞檢測
                     let collision = false;
-                    for (const otherComp of components) {
+                    for (const otherComp of componentState.getComponents()) {
                         if (otherComp.id === comp.id) continue;
                         // AABB 碰撞檢測演算法
                         if (newX < otherComp.x + otherComp.width &&
@@ -219,7 +219,7 @@ function setupInteract() {
 
                     // 碰撞檢測
                     let collision = false;
-                    for (const otherComp of components) {
+                    for (const otherComp of componentState.getComponents()) {
                         if (otherComp.id === comp.id) continue;
                         if (proposedRect.x < otherComp.x + otherComp.width &&
                             proposedRect.x + proposedRect.width > otherComp.x &&
@@ -264,7 +264,7 @@ function setupInteract() {
  */
 function selectComponent(id) {
     deselectComponent(); // 先取消之前選中的
-    selectedComponentId = id;
+    componentState.setSelectedComponentId(id);
     const el = document.getElementById(id);
     if (el) {
         el.classList.add('selected'); // 加上選中樣式
@@ -276,11 +276,12 @@ function selectComponent(id) {
  * 取消選中元件，並隱藏屬性面板
  */
 function deselectComponent() {
-    if (selectedComponentId) {
-        const el = document.getElementById(selectedComponentId);
+    const selectedId = componentState.getSelectedComponentId();
+    if (selectedId) {
+        const el = document.getElementById(selectedId);
         if (el) el.classList.remove('selected');
     }
-    selectedComponentId = null;
+    componentState.setSelectedComponentId(null);
     hidePropertiesPanel();
 }
 
@@ -398,12 +399,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 綁定刪除元件按鈕
     deleteComponentBtn.addEventListener('click', () => {
-        if (selectedComponentId) {
-            components = components.filter(c => c.id !== selectedComponentId);
-            renderAllComponents();
-            subscribeToAllTopics();
-            deselectComponent();
-        }
+        const selectedId = componentState.getSelectedComponentId();
+        if (!selectedId) return;
+        componentState.removeComponent(selectedId);
+        subscribeToAllTopics();
+        deselectComponent();
     });
 
     // 綁定屬性面板關閉按鈕和畫布點擊事件 (用於取消選中)

@@ -1,310 +1,283 @@
 // --- 元件資料管理 ---
-/**
- * 根據指定的類型建立一個新的元件
- * @param {string} type - 要建立的元件類型 (例如 'switch', 'slider')
- */
-function createComponent(type) {
-    // 產生唯一的 ID 和設定預設尺寸
-    const id = `comp_${Date.now()}`;
-    let compWidth = 150;
-    let compHeight = 60;
+const DEFAULT_COMPONENT_SIZE = { width: 150, height: 60 };
+const COMPONENT_SIZE_PRESETS = {
+    gauge: { width: 250, height: 200 },
+    graph: { width: 250, height: 200 },
+    radio: { width: 150, height: 120 },
+    checkbox: { width: 150, height: 120 },
+    text_input: { width: 200, height: 100 },
+    date: { width: 200, height: 90 },
+    time: { width: 200, height: 90 },
+    datetime: { width: 200, height: 90 },
+    notification: { width: 60, height: 60 },
+    template: { width: 200, height: 100 },
+    buzzer: { width: 80, height: 80 },
+    qrcode: { width: 150, height: 150 },
+    image: { width: 150, height: 150 },
+    thermometer: { width: 120, height: 250 },
+    tasmota_relay: { width: 220, height: 120 },
+    tasmota_ws2812: { width: 250, height: 210 },
+    tasmota_status: { width: 280, height: 250 },
+    tasmota_console: { width: 200, height: 150 },
+    tasmota_timer_setter: { width: 320, height: 480 },
+    tasmota_rules_editor: { width: 380, height: 420 },
+    tasmota_options_setter: { width: 280, height: 250 },
+    joystick: { width: 320, height: 180 },
+    tasmota_gpio_module: { width: 350, height: 700 }
+};
 
-    // 根據不同元件類型調整預設尺寸
-    if (type === 'gauge' || type === 'graph') {
-        compWidth = 250;
-        compHeight = 200;
-    } else if (type === 'radio' || type === 'checkbox') {
-        compHeight = 120;
-    } else if (type === 'text_input') {
-        compHeight = 100;
-        compWidth = 200;
-    } else if (['date', 'time', 'datetime'].includes(type)) {
-        compHeight = 90;
-        compWidth = 200;
-    } else if (type === 'notification') {
-        compWidth = 60;
-        compHeight = 60;
-    } else if (type === 'template') {
-        compWidth = 200;
-        compHeight = 100;
-    } else if (type === 'buzzer') {
-        compWidth = 80;
-        compHeight = 80;
-    } else if (type === 'qrcode' || type === 'image') {
-        compWidth = 150;
-        compHeight = 150;
-    } else if (type === 'thermometer') {
-        compWidth = 120;
-        compHeight = 250;
-    } else if (type === 'tasmota_relay') {
-        compWidth = 220;
-        compHeight = 120;
-    } else if (type === 'tasmota_ws2812') {
-        compWidth = 250; // Adjusted width
-        compHeight = 210; // Adjusted height
-    } else if (type === 'tasmota_status') {
-        compWidth = 280;
-        compHeight = 250;
-    } else if (type === 'tasmota_console') {
-        compWidth = 200;
-        compHeight = 150;
-    } else if (type === 'tasmota_timer_setter') {
-        compWidth = 320;
-        compHeight = 480; // 增加高度以容納所有內容
-    } else if (type === 'tasmota_rules_editor') {
-        compWidth = 380;
-        compHeight = 420;
-    } else if (type === 'tasmota_options_setter') {
-        compWidth = 280;
-        compHeight = 250;
-    } else if (type === 'joystick') {
-        compWidth = 320;
-        compHeight = 180;
-    } else if (type === 'tasmota_gpio_module') {
-        compWidth = 350;
-        compHeight = 700;
+const TOPIC_PREFIX = '/my/device';
+const COMPONENT_DEFAULT_FACTORIES = {
+    switch: (id) => ({ value: false, payloadOn: '1', payloadOff: '0', switchStyle: 'slide', topic: buildTopic(id) }),
+    button: (id) => ({ value: 'Click', payloadOn: '1', shape: 'square', topic: buildTopic(id) }),
+    slider: (id) => ({ value: 50, topic: buildTopic(id) }),
+    text: (id) => ({ value: '', topic: buildTopic(id) }),
+    led: (id) => ({
+        value: false,
+        topicMode: 'single',
+        topic: buildTopic(id),
+        colorTopic: buildTopic(id, '/color'),
+        brightnessTopic: buildTopic(id, '/brightness'),
+        color: '#22c55e',
+        brightness: 100
+    }),
+    progress: (id) => ({ value: 25, min: 0, max: 100, topic: buildTopic(id) }),
+    gauge: (id) => ({ value: 25, min: 0, max: 100, topic: buildTopic(id) }),
+    graph: (id) => ({
+        data: [],
+        maxDataPoints: 20,
+        chartType: 'line',
+        chartLabels: '標籤1,標籤2,標籤3',
+        topic: buildTopic(id)
+    }),
+    radio: (id) => ({
+        value: 'val1',
+        topicMode: 'single',
+        topic: buildTopic(id),
+        options: [
+            { label: '選項1', value: 'val1', topic: '' },
+            { label: '選項2', value: 'val2', topic: '' }
+        ]
+    }),
+    checkbox: (id) => ({
+        topicMode: 'single',
+        payloadOn: '1',
+        payloadOff: '0',
+        topic: buildTopic(id),
+        value: [],
+        options: [
+            { label: '選項A', value: 'A', topic: '', checked: false },
+            { label: '選項B', value: 'B', topic: '', checked: false }
+        ]
+    }),
+    dropdown: (id) => ({ value: '選項1', options: '選項1\n選項2\n選項3', topic: buildTopic(id) }),
+    color: (id) => ({ value: '#5e81ac', topic: buildTopic(id) }),
+    text_input: (id) => ({ value: '', topic: buildTopic(id) }),
+    date: (id) => ({ value: '', topic: buildTopic(id) }),
+    time: (id) => ({ value: '', topic: buildTopic(id) }),
+    datetime: (id) => ({ value: '', topic: buildTopic(id) }),
+    notification: (id) => ({ notificationType: 'info', duration: 3000, topic: buildTopic(id) }),
+    template: (id) => ({
+        value: 'N/A',
+        htmlTemplate: '<h1 class="text-xl">數值: <span class="font-bold text-blue-600">{{value}}</span></h1>',
+        topic: buildTopic(id)
+    }),
+    buzzer: (id) => ({ colorNormal: '#3b82f6', colorActive: '#ef4444', duration: 1000, topic: buildTopic(id) }),
+    qrcode: (id) => ({ value: 'Hello MQTT', topic: buildTopic(id) }),
+    thermometer: (id) => ({ value: 25, min: -10, max: 50, unit: 'C', topic: buildTopic(id) }),
+    image: (id) => {
+        const placeholderUrl = 'https://placehold.co/150x150?text=Image';
+        return {
+            sourceType: 'staticUrl',
+            staticUrl: placeholderUrl,
+            value: placeholderUrl,
+            topic: buildTopic(id)
+        };
+    },
+    joystick: (id) => ({
+        label: '搖桿',
+        topicX: buildTopic(id, '/x'),
+        topicY: buildTopic(id, '/y'),
+        maxX: 100,
+        maxY: 100,
+        topicBtnA: buildTopic(id, '/btnA'),
+        payloadBtnAOn: '1',
+        payloadBtnAOff: '0',
+        topicBtnB: buildTopic(id, '/btnB'),
+        payloadBtnBOn: '1',
+        payloadBtnBOff: '0',
+        topicBtnX: buildTopic(id, '/btnX'),
+        payloadBtnXOn: '1',
+        payloadBtnXOff: '0',
+        topicBtnY: buildTopic(id, '/btnY'),
+        payloadBtnYOn: '1',
+        payloadBtnYOff: '0'
+    }),
+    speech: (id) => ({
+        label: '語音',
+        encoding: 'utf-8',
+        text: '這是利用google翻譯的語音服務',
+        speed: 1,
+        times: 1,
+        encodingTopic: buildTopic(id, '/encoding'),
+        textTopic: buildTopic(id, '/text'),
+        speedTopic: buildTopic(id, '/speed'),
+        timesTopic: buildTopic(id, '/times'),
+        isPlaying: false
+    }),
+    tasmota_relay: () => ({
+        tasmotaName: `tasmota_${Date.now() % 1000}`,
+        deviceName: 'New Relay',
+        relayIndex: '',
+        state: 'OFF',
+        isOnline: false,
+        icon: 'lightbulb'
+    }),
+    tasmota_ws2812: () => ({
+        tasmotaName: `tasmota_ws2812_${Date.now() % 1000}`,
+        deviceName: '新 WS2812 燈控',
+        isOnline: false,
+        state: 'OFF',
+        lightIndex: '',
+        hue: 180,
+        saturation: 100,
+        brightness: 100,
+        scheme: 0,
+        pixels: 16,
+        speed: 10,
+        width1: 1,
+        width2: 1,
+        width3: 1,
+        width4: 1
+    }),
+    tasmota_status: () => ({
+        tasmotaName: `tasmota_stat_${Date.now() % 1000}`,
+        deviceName: '新 Tasmota 狀態',
+        isOnline: false,
+        statusData: {},
+        defaultStatus: 1,
+        selectedStatus: 1
+    }),
+    tasmota_console: () => ({
+        tasmotaName: `tasmota_console_${Date.now() % 1000}`,
+        deviceName: '新命令列控制台',
+        isOnline: false
+    }),
+    tasmota_timer_setter: () => ({
+        tasmotaName: `tasmota_timer_${Date.now() % 1000}`,
+        deviceName: '新定時器設定',
+        isOnline: false,
+        timersEnabled: false,
+        selectedTimerIndex: 1,
+        timers: Array.from({ length: 16 }, () => ({}))
+    }),
+    tasmota_rules_editor: () => ({
+        tasmotaName: `tasmota_rules_${Date.now() % 1000}`,
+        deviceName: '新規則編輯器',
+        isOnline: false,
+        selectedRuleIndex: 1,
+        ruleEnabled: false,
+        ruleText: ''
+    }),
+    tasmota_options_setter: () => {
+        const defaultOption = TASMOTA_SETOPTIONS_DATA[0];
+        return {
+            tasmotaName: `tasmota_opts_${Date.now() % 1000}`,
+            deviceName: '新選項設定器',
+            isOnline: false,
+            selectedOption: defaultOption.command,
+            description: defaultOption.description,
+            value: null
+        };
+    },
+    tasmota_gpio_module: () => ({
+        tasmotaName: `tasmota_gpio_${Date.now() % 1000}`,
+        deviceName: '新 GPIO 模組',
+        isOnline: false,
+        currentModule: 'N/A',
+        templateName: 'MyTemplate',
+        availableGpios: null,
+        gpioSettings: [0, 1, 2, 3, 4, 5, 9, 10, 12, 13, 14, 15, 16, 17].reduce((acc, pin) => {
+            acc[pin] = { value: 0 };
+            return acc;
+        }, {})
+    })
+};
+
+function buildTopic(id, suffix = '') {
+    return `${TOPIC_PREFIX}/${id}${suffix}`;
+}
+
+function shouldProvideDefaultTopic(type) {
+    return !type.startsWith('tasmota_') && type !== 'joystick' && type !== 'speech';
+}
+
+function getComponentSize(type) {
+    return COMPONENT_SIZE_PRESETS[type] || DEFAULT_COMPONENT_SIZE;
+}
+
+function getComponentDefaults(type, id) {
+    const factory = COMPONENT_DEFAULT_FACTORIES[type];
+    const defaults = factory ? factory(id) : {};
+    if (shouldProvideDefaultTopic(type) && defaults.topic === undefined) {
+        return { ...defaults, topic: buildTopic(id) };
     }
+    return defaults;
+}
 
-
-    // --- 自動定位演算法 ---
-    // 尋找一個不會與現有元件重疊的位置
+function findAvailablePosition(width, height) {
     let newX = 20;
     let newY = 20;
     const margin = 20;
-
     let isOverlapping = true;
+
     while (isOverlapping) {
         isOverlapping = false;
         for (const comp of components) {
-            // AABB 碰撞檢測
             if (newX < comp.x + comp.width + margin &&
-                newX + compWidth + margin > comp.x &&
+                newX + width + margin > comp.x &&
                 newY < comp.y + comp.height + margin &&
-                newY + compHeight + margin > comp.y) {
+                newY + height + margin > comp.y) {
                 isOverlapping = true;
                 break;
             }
         }
 
-        // 如果重疊，則向右移動；如果超出畫布，則換行
         if (isOverlapping) {
             newX += 150 + margin;
-            if (newX + compWidth > canvas.clientWidth) {
+            if (newX + width > canvas.clientWidth) {
                 newX = 20;
                 newY += 60 + margin;
             }
         }
     }
 
-    // 建立新元件的基礎物件
+    return { x: newX, y: newY };
+}
+
+/**
+ * 根據指定的類型建立一個新的元件
+ * @param {string} type - 要建立的元件類型 (例如 'switch', 'slider')
+ */
+function createComponent(type) {
+    const id = `comp_${Date.now()}`;
+    const size = getComponentSize(type);
+    const position = findAvailablePosition(size.width, size.height);
+
     const newComponent = {
-        id, type, x: newX, y: newY, width: compWidth, height: compHeight,
-        label: `新 ${type}`, isJsonPayload: false
+        id,
+        type,
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+        label: `新 ${type}`,
+        isJsonPayload: false,
+        ...getComponentDefaults(type, id)
     };
 
-    // --- 根據元件類型設定專屬的預設屬性 ---
-    switch (type) {
-        case 'switch':
-            Object.assign(newComponent, { value: false, payloadOn: '1', payloadOff: '0', switchStyle: 'slide', topic: `/my/device/${id}` });
-            break;
-        case 'button':
-            Object.assign(newComponent, { value: 'Click', payloadOn: '1', shape: 'square', topic: `/my/device/${id}` });
-            break;
-        case 'slider':
-            Object.assign(newComponent, { value: 50, topic: `/my/device/${id}` });
-            break;
-        case 'text':
-            Object.assign(newComponent, { value: '', topic: `/my/device/${id}` });
-            break;
-        case 'led':
-            Object.assign(newComponent, {
-                value: false, topicMode: 'single', topic: `/my/device/${id}`, colorTopic: `/my/device/${id}/color`,
-                brightnessTopic: `/my/device/${id}/brightness`, color: '#22c55e', brightness: 100
-            });
-            break;
-        case 'progress':
-        case 'gauge':
-            Object.assign(newComponent, { value: 25, min: 0, max: 100, topic: `/my/device/${id}` });
-            break;
-        case 'graph':
-            Object.assign(newComponent, {
-                data: [],
-                maxDataPoints: 20,
-                chartType: 'line',
-                chartLabels: '標籤1,標籤2,標籤3',
-                topic: `/my/device/${id}`
-            });
-            break;
-        case 'radio':
-            Object.assign(newComponent, {
-                value: 'val1', topicMode: 'single', topic: `/my/device/${id}`, options: [
-                    { label: '選項1', value: 'val1', topic: '' }, { label: '選項2', value: 'val2', topic: '' }
-                ]
-            });
-            break;
-        case 'checkbox':
-            Object.assign(newComponent, {
-                topicMode: 'single', payloadOn: '1', payloadOff: '0', topic: `/my/device/${id}`, value: [], options: [
-                    { label: '選項A', value: 'A', topic: '', checked: false }, { label: '選項B', value: 'B', topic: '', checked: false }
-                ]
-            });
-            break;
-        case 'dropdown':
-            Object.assign(newComponent, { value: '選項1', options: '選項1\n選項2\n選項3', topic: `/my/device/${id}` });
-            break;
-        case 'color':
-            Object.assign(newComponent, { value: '#5e81ac', topic: `/my/device/${id}` });
-            break;
-        case 'text_input':
-            Object.assign(newComponent, { value: '', topic: `/my/device/${id}` });
-            break;
-        case 'date': case 'time': case 'datetime':
-            Object.assign(newComponent, { value: '', topic: `/my/device/${id}` });
-            break;
-        case 'notification':
-            Object.assign(newComponent, { notificationType: 'info', duration: 3000, topic: `/my/device/${id}` });
-            break;
-        case 'template':
-            Object.assign(newComponent, { value: 'N/A', htmlTemplate: '<h1 class="text-xl">數值: <span class="font-bold text-blue-600">{{value}}</span></h1>', topic: `/my/device/${id}` });
-            break;
-        case 'buzzer':
-            Object.assign(newComponent, { colorNormal: '#3b82f6', colorActive: '#ef4444', duration: 1000, topic: `/my/device/${id}` });
-            break;
-        case 'qrcode':
-            Object.assign(newComponent, { value: 'Hello MQTT', topic: `/my/device/${id}` });
-            break;
-        case 'thermometer':
-            Object.assign(newComponent, { value: 25, min: -10, max: 50, unit: 'C', topic: `/my/device/${id}` });
-            break;
-        case 'image':
-            const placeholderUrl = 'https://placehold.co/150x150?text=Image';
-            Object.assign(newComponent, {
-                sourceType: 'staticUrl', staticUrl: placeholderUrl, value: placeholderUrl, topic: `/my/device/${id}`
-            });
-            break;
-        case 'joystick':
-            Object.assign(newComponent, {
-                label: `搖桿`,
-                topicX: `/my/device/${id}/x`,
-                topicY: `/my/device/${id}/y`,
-                maxX: 100,
-                maxY: 100,
-                topicBtnA: `/my/device/${id}/btnA`,
-                payloadBtnAOn: '1',
-                payloadBtnAOff: '0',
-                topicBtnB: `/my/device/${id}/btnB`,
-                payloadBtnBOn: '1',
-                payloadBtnBOff: '0',
-                topicBtnX: `/my/device/${id}/btnX`,
-                payloadBtnXOn: '1',
-                payloadBtnXOff: '0',
-                topicBtnY: `/my/device/${id}/btnY`,
-                payloadBtnYOn: '1',
-                payloadBtnYOff: '0'
-            });
-            break;
-        case 'speech':
-            Object.assign(newComponent, {
-                label: '語音',
-                encoding: 'utf-8',
-                text: '這是利用google翻譯的語音服務',
-                speed: 1,
-                times: 1,
-                encodingTopic: `/my/device/${id}/encoding`,
-                textTopic: `/my/device/${id}/text`,
-                speedTopic: `/my/device/${id}/speed`,
-                timesTopic: `/my/device/${id}/times`,
-                isPlaying: false
-            });
-            break;
-        case 'tasmota_relay':
-            Object.assign(newComponent, {
-                tasmotaName: `tasmota_${Date.now() % 1000}`,
-                deviceName: 'New Relay',
-                relayIndex: '',
-                state: 'OFF',
-                isOnline: false,
-                icon: 'lightbulb'
-            });
-            break;
-        case 'tasmota_ws2812':
-            Object.assign(newComponent, {
-                tasmotaName: `tasmota_ws2812_${Date.now() % 1000}`,
-                deviceName: '新 WS2812 燈控',
-                isOnline: false,
-                state: 'OFF',
-                lightIndex: '',
-                hue: 180, saturation: 100, brightness: 100,
-                scheme: 0, pixels: 16, speed: 10,
-                width1: 1, width2: 1, width3: 1, width4: 1 // New width properties
-            });
-            break;
-        case 'tasmota_status':
-            Object.assign(newComponent, {
-                tasmotaName: `tasmota_stat_${Date.now() % 1000}`,
-                deviceName: '新 Tasmota 狀態',
-                isOnline: false,
-                statusData: {},
-                defaultStatus: 1, // 新增：預設顯示項目
-                selectedStatus: 1 // Default status to show
-            });
-            break;
-        case 'tasmota_console':
-            Object.assign(newComponent, {
-                tasmotaName: `tasmota_console_${Date.now() % 1000}`,
-                deviceName: '新命令列控制台',
-                isOnline: false,
-            });
-            break;
-        case 'tasmota_timer_setter':
-            Object.assign(newComponent, {
-                tasmotaName: `tasmota_timer_${Date.now() % 1000}`,
-                deviceName: '新定時器設定',
-                isOnline: false,
-                timersEnabled: false,
-                selectedTimerIndex: 1,
-                timers: Array.from({ length: 16 }, () => ({})), // Array of 16 timer config objects
-            });
-            break;
-        case 'tasmota_rules_editor':
-            Object.assign(newComponent, {
-                tasmotaName: `tasmota_rules_${Date.now() % 1000}`,
-                deviceName: '新規則編輯器',
-                isOnline: false,
-                selectedRuleIndex: 1,
-                ruleEnabled: false,
-                ruleText: '',
-            });
-            break;
-        case 'tasmota_options_setter':
-            const defaultOption = TASMOTA_SETOPTIONS_DATA[0];
-            Object.assign(newComponent, {
-                tasmotaName: `tasmota_opts_${Date.now() % 1000}`,
-                deviceName: '新選項設定器',
-                isOnline: false,
-                selectedOption: defaultOption.command,
-                description: defaultOption.description,
-                value: null // Initially unknown
-            });
-            break;
-        case 'tasmota_gpio_module':
-            Object.assign(newComponent, {
-                tasmotaName: `tasmota_gpio_${Date.now() % 1000}`,
-                deviceName: '新 GPIO 模組',
-                isOnline: false,
-                currentModule: 'N/A',
-                templateName: 'MyTemplate',
-                availableGpios: null, // 用於儲存從裝置獲取的功能列表
-                gpioSettings: [0, 1, 2, 3, 4, 5, 9, 10, 12, 13, 14, 15, 16, 17].reduce((acc, pin) => {
-                    acc[pin] = { value: 0 };
-                    return acc;
-                }, {}),
-            });
-            break;
-    }
-
-    // 將新元件加入到 `components` 陣列中，並重新渲染畫布和更新 MQTT 訂閱
-    components.push(newComponent);
+    // 將新元件加入到狀態中，並重新渲染畫布和更新 MQTT 訂閱
+    componentState.addComponent(newComponent);
     renderAllComponents();
     subscribeToAllTopics();
 }
@@ -1135,6 +1108,7 @@ function generateDashboardHTML(brokerUrl, componentsData, username, password) {
     const componentsJSON = JSON.stringify(componentsData, null, 2);
     const hasGraph = componentsData.some(c => c.type === 'graph');
     const hasQrCode = componentsData.some(c => c.type === 'qrcode');
+    const componentStateSource = componentState.constructor.toString();
 
     // 建立最終的啟動腳本
     const runtimeScript = `
@@ -1146,7 +1120,14 @@ function generateDashboardHTML(brokerUrl, componentsData, username, password) {
             const brokerUrl = \`${brokerUrl}\`;
             const username = \`${username}\`;
             const password = \`${password}\`;
-            let components = ${componentsJSON};
+
+            const ComponentStateManager = ${componentStateSource};
+            const componentState = new ComponentStateManager();
+            const components = componentState.getComponents();
+            window.componentState = componentState;
+            window.components = components;
+            componentState.setComponents(${componentsJSON});
+            componentState.setMode('view');
 
             // 儀表板載入時，將 selectedStatus 與 defaultStatus 同步
             components.forEach(c => {
@@ -1264,13 +1245,14 @@ function loadDashboard(event) {
         const content = e.target.result;
         try {
             // 從 HTML 內容中用正則表達式提取元件資料和 Broker 設定
-            const componentsMatch = content.match(/let components = (\[[\s\S]*?\]);/); // 保持不變
+            const componentsMatch = content.match(/componentState\.setComponents\((\[[\s\S]*?\])\);/) ||
+                content.match(/let components = (\[[\s\S]*?\]);/);
             const brokerUrlMatch = content.match(/const brokerUrl = `(.*?)`;/);
             const usernameMatch = content.match(/const username = `(.*?)`;/);
             const passwordMatch = content.match(/const password = `(.*?)`;/);
 
             if (componentsMatch && componentsMatch[1] && brokerUrlMatch && brokerUrlMatch[1]) {
-                components = JSON.parse(componentsMatch[1]);
+                componentState.setComponents(JSON.parse(componentsMatch[1]));
                 const brokerUrlData = brokerUrlMatch[1];
                 try {
                     const url = new URL(brokerUrlData);
