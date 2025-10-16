@@ -11,8 +11,8 @@ function renderAllComponents() {
     for (const key in chartInstances) delete chartInstances[key];
     for (const key in qrCodeInstances) delete qrCodeInstances[key];
 
-    // 2. 遍歷 `components` 陣列中的每一個元件物件
-    components.forEach(comp => {
+    // 2. 遍歷元件狀態中的每一個元件物件
+    componentState.getComponents().forEach(comp => {
         // 3. 為每個元件建立一個 div 容器
         const el = document.createElement('div');
         el.id = comp.id;
@@ -697,8 +697,9 @@ function renderAllComponents() {
     // 10. 確保拖拉縮放功能在重新渲染後依然可用，並恢復選中狀態
     if (canvas.classList.contains('edit-mode')) {
         setupInteract();
-        if (selectedComponentId) {
-            const selectedEl = document.getElementById(selectedComponentId);
+        const selectedId = componentState.getSelectedComponentId();
+        if (selectedId) {
+            const selectedEl = document.getElementById(selectedId);
             if (selectedEl) selectedEl.classList.add('selected');
         }
     }
@@ -770,7 +771,7 @@ function updateComponent(id, newProps) {
                 }
 
                 // 如果屬性面板正在顯示此元件，則同步更新
-                if (selectedComponentId === id) {
+                if (componentState.getSelectedComponentId() === id) {
                     const panel = document.getElementById('propertiesPanel');
                     if (newProps.hasOwnProperty('encoding')) {
                         panel.querySelector('[data-prop="encoding"]').value = comp.encoding;
@@ -1655,6 +1656,7 @@ function showPropertiesPanel(id) {
     // 6. 為所有屬性輸入框綁定 'input' 事件，當使用者修改屬性時，即時更新元件
     document.querySelectorAll('.prop-input').forEach(input => {
         input.addEventListener('input', (e) => {
+            const selectedId = componentState.getSelectedComponentId();
             const prop = e.target.dataset.prop;
             let value = (e.target.type === 'checkbox') ? e.target.checked : e.target.value;
             if (input.type === 'number') value = parseFloat(value) || 0;
@@ -1674,7 +1676,7 @@ function showPropertiesPanel(id) {
 
             // --- Tasmota Status: Special handling for defaultStatus change ---
             if (prop === 'defaultStatus') {
-                const changedComp = findComponentById(selectedComponentId);
+                const changedComp = findComponentById(selectedId);
                 // 確保只有在檢視模式下，或是 MQTT 已連線時才觸發查詢
                 if (changedComp && changedComp.type === 'tasmota_status' &&
                     (canvas.classList.contains('view-mode') || (mqttClient && mqttClient.connected))) {
@@ -1682,10 +1684,10 @@ function showPropertiesPanel(id) {
                     // 1. 同步當前選擇、清除舊資料並更新元件狀態
                     updates.selectedStatus = newStatus;
                     updates.statusData = {};
-                    updateComponent(selectedComponentId, updates);
+                    updateComponent(selectedId, updates);
 
                     // 2. 為新選擇的狀態觸發 MQTT 查詢
-                    handleTasmotaInteraction(selectedComponentId, 'status_query', { statusNumber: newStatus });
+                    handleTasmotaInteraction(selectedId, 'status_query', { statusNumber: newStatus });
 
                     // 3. 重新訂閱主題以獲取新的 STATUS 主題
                     subscribeToAllTopics();
@@ -1704,20 +1706,21 @@ function showPropertiesPanel(id) {
                 const el = document.getElementById(id);
                 if (el) el.classList.add('selected');
             } else {
-                updateComponent(selectedComponentId, updates);
+                updateComponent(selectedId, updates);
             }
 
             // 如果是 tasmota_status 元件的 tasmotaName 發生變化，自動獲取其預設狀態
-            const changedComp = findComponentById(selectedComponentId);
+            const selectedId = componentState.getSelectedComponentId();
+            const changedComp = findComponentById(selectedId);
             if (changedComp && changedComp.type === 'tasmota_status' && prop === 'tasmotaName' && changedComp.tasmotaName) {
-                handleTasmotaInteraction(selectedComponentId, 'status_query', { statusNumber: changedComp.selectedStatus });
-                updateComponent(selectedComponentId, { statusData: {} }); // 清空舊資料
+                handleTasmotaInteraction(selectedId, 'status_query', { statusNumber: changedComp.selectedStatus });
+                updateComponent(selectedId, { statusData: {} }); // 清空舊資料
             }
             // 如果是 tasmota_gpio_module 元件的 tasmotaName 發生變化，自動獲取其 GPIO 功能列表
             if (changedComp && changedComp.type === 'tasmota_gpio_module' && prop === 'tasmotaName' && changedComp.tasmotaName) {
                 // 清空舊資料並觸發查詢
-                updateComponent(selectedComponentId, { availableGpios: null, currentModule: 'N/A' });
-                handleTasmotaInteraction(selectedComponentId, 'gpio_options_query');
+                updateComponent(selectedId, { availableGpios: null, currentModule: 'N/A' });
+                handleTasmotaInteraction(selectedId, 'gpio_options_query');
             }
 
             // 如果修改了影響 MQTT 訂閱的屬性，則重新訂閱
