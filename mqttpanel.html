@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MQTT 互動式畫布編輯器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <style>
+        /* 自定義樣式 */
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+        }
+
+        .edit-mode .component {
+            border: 2px dashed #3b82f6;
+            cursor: move;
+            transition: box-shadow 0.2s ease-in-out;
+        }
+
+            .edit-mode .component:hover {
+                box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+            }
+
+            .edit-mode .component > * {
+                pointer-events: none;
+            }
+
+        .view-mode .component {
+            pointer-events: none;
+        }
+
+            .view-mode .component > * {
+                pointer-events: auto;
+            }
+
+        .component.selected {
+            border-style: solid;
+            border-color: #ef4444;
+            z-index: 1000 !important;
+        }
+
+        .transition-all {
+            transition: all 0.3s ease;
+        }
+
+        input:checked ~ .dot {
+            transform: translateX(100%);
+        }
+
+        input:checked ~ .block {
+            background-color: #48bb78;
+        }
+
+        input:disabled, select:disabled, textarea:disabled, button:disabled {
+            background-color: #f3f4f6;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        .led-indicator {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            transition: background-color 0.3s, box-shadow 0.3s;
+            box-shadow: 0 0 5px rgba(0,0,0,0.2);
+        }
+
+        .color-picker-input {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+            .color-picker-input::-webkit-color-swatch-wrapper {
+                padding: 0;
+            }
+
+            .color-picker-input::-webkit-color-swatch {
+                border: 1px solid #ccc;
+                border-radius: 8px;
+            }
+
+        .toast {
+            animation: slideInRight 0.3s ease-out, fadeOut 0.5s ease-in 2.5s forwards;
+        }
+
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes fadeOut {
+            from {
+                opacity: 1;
+            }
+
+            to {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+        }
+
+        .shaking {
+            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes shake {
+            10%, 90% {
+                transform: translate3d(-1px, 0, 0) rotate(0deg);
+            }
+
+            20%, 80% {
+                transform: translate3d(2px, 0, 0) rotate(2deg);
+            }
+
+            30%, 50%, 70% {
+                transform: translate3d(-3px, 0, 0) rotate(-3deg);
+            }
+
+            40%, 60% {
+                transform: translate3d(3px, 0, 0) rotate(3deg);
+            }
+        }
+        /* Slider Thumb 的樣式 (圓形) */
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #3b82f6;
+            cursor: pointer;
+            border-radius: 50%; /* 確保為圓形 */
+            margin-top: -8px; /* 調整垂直位置 */
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: #3b82f6;
+            cursor: pointer;
+            border-radius: 50%; /* 確保為圓形 */
+        }
+
+        .image-component-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        /* Rocker Switch Styles */
+        .rocker-switch {
+            width: 42px;
+            height: 64px;
+            background-color: #1f2937; /* gray-800 */
+            border-radius: 8px;
+            padding: 6px;
+            cursor: pointer;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
+        }
+
+            .rocker-switch .rocker-handle {
+                width: 100%;
+                height: 100%;
+                border-radius: 4px;
+                position: relative;
+                transition: all 0.2s ease-in-out;
+                transform-style: preserve-3d;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                align-items: center;
+                padding: 5px 0;
+                color: white;
+                font-family: sans-serif;
+                font-weight: bold;
+                font-size: 14px;
+                /* OFF state */
+                background: linear-gradient(to bottom, #ef4444, #dc2626); /* red */
+                transform: perspective(200px) rotateX(15deg);
+            }
+
+                .rocker-switch .rocker-handle::before {
+                    content: 'O';
+                }
+
+                .rocker-switch .rocker-handle::after {
+                    content: 'I';
+                }
+
+            .rocker-switch.on .rocker-handle {
+                /* ON state */
+                background: linear-gradient(to bottom, #3b82f6, #2563eb); /* blue */
+                transform: perspective(200px) rotateX(-15deg);
+            }
+        /* Push Switch Styles */
+        .push-switch {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background-color: #d1d5db; /* gray-300 */
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.2), inset 0 2px 3px rgba(255,255,255,0.6), inset 0 -3px 3px rgba(0,0,0,0.2);
+        }
+
+            .push-switch::before {
+                content: '';
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%) scale(1);
+                width: 32px;
+                height: 32px;
+                background: linear-gradient(to bottom, #f87171, #ef4444); /* red-400 to red-500 */
+                border-radius: 50%;
+                box-shadow: inset 0 3px 5px rgba(255,255,255,0.6), 0 2px 4px rgba(0,0,0,0.4);
+                transition: all 0.2s ease;
+            }
+
+            .push-switch.on {
+                box-shadow: 0 1px 2px rgba(0,0,0,0.3), inset 0 3px 4px rgba(0,0,0,0.3), inset 0 -2px 2px rgba(255,255,255,0.1);
+            }
+
+                .push-switch.on::before {
+                    background: linear-gradient(to bottom, #4ade80, #22c55e); /* green-400 to green-500 */
+                    transform: translate(-50%, -50%) scale(0.95); /* Corrected centering */
+                    box-shadow: inset 0 2px 4px rgba(0,0,0,0.5), 0 1px 1px rgba(255,255,255,0.3);
+                }
+        /* Accordion Styles */
+        .accordion-header {
+            cursor: pointer;
+            padding: 0.5rem;
+            background-color: #f3f4f6; /* gray-200 */
+            border-radius: 0.375rem; /* rounded-md */
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background-color 0.2s;
+        }
+
+            .accordion-header:hover {
+                background-color: #e5e7eb; /* gray-300 */
+            }
+
+        .accordion-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+
+        .accordion-arrow {
+            transition: transform 0.3s;
+        }
+
+        .accordion-header.active .accordion-arrow {
+            transform: rotate(90deg);
+        }
+        /* Custom styles for HSB sliders */
+        .hsb-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 12px;
+            border-radius: 6px;
+            outline: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .hue-slider {
+            background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+        }
+
+        .saturation-slider {
+            background: linear-gradient(to right, #808080, #f00);
+        }
+
+        .brightness-slider {
+            background: linear-gradient(to right, #000, #fff);
+        }
+        /* Tasmota Timer Component */
+        .timer-day-label {
+            display: inline-flex; /* 使用 Flexbox 進行置中 */
+            align-items: center; /* 垂直置中 */
+            justify-content: center; /* 水平置中 */
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background-color: #e5e7eb;
+            color: #4b5563;
+        }
+
+        .timer-day-input:checked + .timer-day-label {
+            background-color: #3b82f6;
+            color: white;
+        }
+        /* Joystick Button Styles */
+        .joystick-btn {
+            transition: transform 0.1s ease-out, box-shadow 0.1s ease-out;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+            .joystick-btn.pressed {
+                transform: scale(0.9);
+                box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);
+            }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col h-screen">
+
+    <div class="flex flex-1 overflow-hidden">
+
+        <aside class="w-64 bg-white p-4 shadow-lg flex flex-col space-y-4 overflow-y-auto">
+            <h1 class="text-xl font-bold text-gray-800">控制面板</h1>
+
+            <div>
+                <h2 class="text-sm font-semibold text-gray-600 mb-2">模式</h2>
+                <div class="flex bg-gray-200 rounded-lg p-1">
+                    <button id="editModeBtn" class="flex-1 py-2 px-4 rounded-md text-sm font-medium bg-blue-500 text-white">編輯模式</button>
+                    <button id="viewModeBtn" class="flex-1 py-2 px-4 rounded-md text-sm font-medium text-gray-700">檢視模式</button>
+                </div>
+            </div>
+
+            <div id="mqtt-settings" class="space-y-2">
+                <h2 class="text-sm font-semibold text-gray-600 mb-2">MQTT Broker</h2>
+                <div class="grid grid-cols-2 gap-2">
+                    <select id="mqttProtocol" class="px-2 py-2 border rounded-md text-sm col-span-1">
+                        <option value="wss://">wss://</option>
+                        <option value="ws://">ws://</option>
+                    </select>
+                    <input type="number" id="mqttPort" placeholder="埠號" class="w-full px-3 py-2 border rounded-md text-sm col-span-1" value="8081">
+                </div>
+                <input type="text" id="mqttServer" placeholder="伺服器位址" class="w-full px-3 py-2 border rounded-md text-sm" value="test.mosquitto.org">
+                <input type="text" id="mqttPath" placeholder="路徑 (例如: /mqtt)" class="w-full px-3 py-2 border rounded-md text-sm" value="">
+                <input type="text" id="mqttUsername" placeholder="使用者名稱 (可選)" class="w-full px-3 py-2 border rounded-md text-sm">
+                <input type="password" id="mqttPassword" placeholder="密碼 (可選)" class="w-full px-3 py-2 border rounded-md text-sm">
+                <button id="connectMqttBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-md text-sm transition-all">連接</button>
+                <div id="connectionStatus" class="text-xs text-center p-1 rounded-full bg-gray-300 text-gray-700">未連接</div>
+            </div>
+
+            <div>
+                <h2 class="text-sm font-semibold text-gray-600 mb-2">佈局</h2>
+                <div class="space-y-2">
+                    <button id="saveDashboardBtn" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-md text-sm transition-all">儲存為 HTML</button>
+                    <button id="loadDashboardBtn" class="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md text-sm transition-all">讀取 HTML</button>
+                    <input type="file" id="fileInput" class="hidden" accept=".html">
+                </div>
+            </div>
+
+
+            <div id="add-component-panel">
+                <h2 class="text-sm font-semibold text-gray-600 mb-2">添加元件</h2>
+                <div class="space-y-2">
+                    <div>
+                        <button class="accordion-header w-full text-left">
+                            <span class="text-xs font-semibold text-gray-700">輸入控制</span>
+                            <svg class="w-4 h-4 accordion-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                        </button>
+                        <div class="accordion-content">
+                            <div class="grid grid-cols-2 gap-2 text-gray-700 pt-2">
+                                <button data-type="switch" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg><span class="text-xs">開關</span></button>
+                                <button data-type="button" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 002 2h3a2 2 0 002-2V7a2 2 0 00-2-2H5z" /></svg><span class="text-xs">按鈕</span></button>
+                                <button data-type="slider" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" /></svg><span class="text-xs">滑桿</span></button>
+                                <button data-type="radio" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg><span class="text-xs">選項按鈕</span></button>
+                                <button data-type="dropdown" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg><span class="text-xs">下拉選單</span></button>
+                                <button data-type="checkbox" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span class="text-xs">核取方塊</span></button>
+                                <button data-type="color" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" /></svg><span class="text-xs">顏色選擇</span></button>
+                                <button data-type="text_input" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg><span class="text-xs">文字輸入</span></button>
+                                <button data-type="date" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg><span class="text-xs">日期</span></button>
+                                <button data-type="time" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span class="text-xs">時間</span></button>
+                                <button data-type="datetime" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z M12 11v4l2 2" /></svg><span class="text-xs">日期時間</span></button>
+                                <button data-type="joystick" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4h4m12 4V4h-4M8 20H4v-4m12 0h4v-4m-4-4h-8v8h8z" /></svg><span class="text-xs">搖桿</span></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <button class="accordion-header w-full text-left">
+                            <span class="text-xs font-semibold text-gray-700">資料顯示</span>
+                            <svg class="w-4 h-4 accordion-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                        </button>
+                        <div class="accordion-content">
+                            <div class="grid grid-cols-2 gap-2 text-gray-700 pt-2">
+                                <button data-type="text" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10m16-10v10M9 9h6m-6 4h6m-6 4h6" /></svg><span class="text-xs">文字框</span></button>
+                                <button data-type="progress" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2" /></svg><span class="text-xs">進度條</span></button>
+                                <button data-type="gauge" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span class="text-xs">儀表板</span></button>
+                                <button data-type="graph" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18" /></svg><span class="text-xs">圖表</span></button>
+                                <button data-type="template" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg><span class="text-xs">範本</span></button>
+                                <button data-type="thermometer" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12M9 9l3-3 3 3M9 15l3 3 3-3" /></svg><span class="text-xs">溫度計</span></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <button class="accordion-header w-full text-left">
+                            <span class="text-xs font-semibold text-gray-700">視覺與通知</span>
+                            <svg class="w-4 h-4 accordion-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                        </button>
+                        <div class="accordion-content">
+                            <div class="grid grid-cols-2 gap-2 text-gray-700 pt-2">
+                                <button data-type="led" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg><span class="text-xs">LED</span></button>
+                                <button data-type="speech" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg><span class="text-xs">語音</span></button>
+                                <button data-type="notification" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg><span class="text-xs">通知</span></button>
+                                <button data-type="buzzer" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.348 5.352A6 6 0 0118 9v3.159c0 .538-.214 1.055-.595 1.436l.999 1.001a1 1 0 01-.707 1.707H5.765a1 1 0 01-.707-1.707l.999-1.001A2.032 2.032 0 006 12.159V9a6 6 0 012.652-5.648M9 17v1a3 3 0 006 0v-1" /></svg><span class="text-xs">響鈴</span></button>
+                                <button data-type="qrcode" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /><path d="M3 3h3v3H3zM18 3h3v3h-3zM3 18h3v3H3zM18 18h3v3h-3z" /></svg><span class="text-xs">QR Code</span></button>
+                                <button data-type="image" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg><span class="text-xs">圖片</span></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <button class="accordion-header w-full text-left">
+                            <span class="text-xs font-semibold text-gray-700">TASMOTA 元件</span>
+                            <svg class="w-4 h-4 accordion-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                        </button>
+                        <div class="accordion-content">
+                            <div class="grid grid-cols-2 gap-2 text-gray-700 pt-2">
+                                <button data-type="tasmota_relay" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg><span class="text-xs">繼電器</span></button>
+                                <button data-type="tasmota_ws2812" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg><span class="text-xs">WS2812燈控</span></button>
+                                <button data-type="tasmota_status" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="text-xs">狀態顯示</span></button>
+                                <button data-type="tasmota_timer_setter" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span class="text-xs">定時器</span></button>
+                                <button data-type="tasmota_rules_editor" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg><span class="text-xs">規則器</span></button>
+                                <button data-type="tasmota_options_setter" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg><span class="text-xs">選項設定</span></button>
+                                <button data-type="tasmota_gpio_module" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center"><svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M12 5V3m0 18v-2M8 8l1.414-1.414M14.586 14.586L16 16m-1.414-8.071L16 6.5M8 16l-1.414 1.414M12 14a2 2 0 100-4 2 2 0 000 4z" /></svg><span class="text-xs">腳位模組</span></button>
+                                <button data-type="tasmota_console" class="add-component-btn bg-gray-200 hover:bg-gray-300 p-3 rounded-lg flex flex-col items-center">
+                                    <svg class="w-6 h-6 mb-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15h14"></path>
+                                    </svg>
+                                    <span class="text-xs">命令列</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="flex-1 bg-gray-200 relative overflow-auto">
+            <div id="canvas" class="w-full h-full relative edit-mode">
+            </div>
+        </main>
+
+        <aside id="propertiesPanel" class="w-72 bg-white p-4 shadow-lg transform translate-x-full transition-transform duration-300 ease-in-out overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold text-gray-800">屬性</h2>
+                <button id="closePropertiesBtn" class="text-gray-500 hover:text-gray-800">&times;</button>
+            </div>
+            <div id="propertiesContent" class="space-y-4">
+                <p class="text-sm text-gray-500">在編輯模式下選擇一個元件以編輯其屬性。</p>
+            </div>
+            <button id="deleteComponentBtn" class="w-full mt-6 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-md text-sm transition-all hidden">刪除元件</button>
+        </aside>
+
+    </div>
+
+    <div id="toast-container" class="fixed top-5 right-5 z-50 space-y-2"></div>
+
+    <script src="./tasmota_options_data.js"></script>
+    <script src="./component_renderer.js"></script>
+    <script src="./ui_renderer.js"></script>
+    <script src="./ui_manager.js"></script>
+    <script src="./mqtt_panel_logic.js"></script>
+</body>
+</html>
+
